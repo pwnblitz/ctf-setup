@@ -14,6 +14,7 @@ INSTALL_BUILD_CRAMFS="${INSTALL_BUILD_CRAMFS:-0}"
 INSTALL_BASH_BEAUTY="${INSTALL_BASH_BEAUTY:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_KERNEL_TOOLKIT="${INSTALL_KERNEL_TOOLKIT:-0}"
+INSTALL_VIM="${INSTALL_VIM:-1}"
 
 VISUALVM_METHOD="${VISUALVM_METHOD:-official}"
 
@@ -78,6 +79,7 @@ bash "$ROOT_DIR/scripts/ctf_help.sh" || true
 [[ "$INSTALL_KERNEL_TOOLKIT" == "1" ]] && bash "$ROOT_DIR/scripts/kernel_toolkit.sh" "$KVER" || true
 [[ "$INSTALL_BASH_BEAUTY" == "1" ]] && bash "$ROOT_DIR/scripts/bash_beauty.sh" || true
 [[ "$INSTALL_VSCODE" == "1" ]] && bash "$ROOT_DIR/scripts/install_vscode.sh" || true
+[[ "$INSTALL_VIM" == "1" ]] && bash "$ROOT_DIR/scripts/install_vim.sh" || true
 
 if [[ "$INSTALL_DOCKER" == "1" ]]; then
   log "Installing Docker…"

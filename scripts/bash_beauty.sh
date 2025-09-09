@@ -42,7 +42,7 @@ truncate_to_repo = false
 style = "bold cyan"
 
 [git_branch]
-symbol = " "
+symbol = "⎇ "
 style = "bold yellow"
 
 [git_status]
