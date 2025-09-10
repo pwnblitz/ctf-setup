@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # scripts/install_nerdfont.sh
-# Ubuntu용 Nerd Font 설치 + (옵션) WSL에서 Windows 쪽 자동 설치 + (옵션) GNOME Terminal 폰트 적용
+# Ubuntu용 Nerd Font 설치 + (옵션) WSL에서 Windows에 설치 + (옵션) GNOME Terminal 폰트 자동 적용
+# 기본 폰트: FiraCode Nerd Font
+#
 # Usage:
 #   bash scripts/install_nerdfont.sh
+#
 # Env:
 #   FONTS="FiraCode JetBrainsMono Hack"   # 설치할 폰트 ZIP 이름들(기본: FiraCode)
 #   SCOPE="user" | "system"               # 리눅스 설치 범위(기본: user)
@@ -60,7 +63,7 @@ $SUDO mkdir -p "$DEST"
 # --- 리눅스(Nerd Font) 설치 ---
 install_font_linux() {
   local name="$1"
-  local tmpdir zip url files
+  local tmpdir zip url
   tmpdir="$(mktemp -d)"
   zip="$tmpdir/${name}.zip"
   url="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${name}.zip"
@@ -78,7 +81,7 @@ install_font_linux() {
   fi
 
   shopt -s nullglob
-  files=( "$tmpdir/${name}"/*.{ttf,otf} )
+  local files=( "$tmpdir/${name}"/*.{ttf,otf} )
   if [ ${#files[@]} -eq 0 ]; then
     warn "$name: 글꼴 파일(.ttf/.otf) 없음"
     rm -rf "$tmpdir"; return 1
@@ -99,24 +102,23 @@ $SUDO fc-cache -fv >/dev/null || true
 
 # --- GNOME Terminal 자동 적용 (옵션) ---
 apply_gnome_terminal_font() {
-  # GUI/세션이 없으면 skip
+  # gsettings / D-Bus 세션 필요
   if ! need gsettings; then
     warn "gsettings가 없어 GNOME 적용을 건너뜁니다."
     return 0
   fi
 
-  # 기본 프로필 UUID 얻기
-  local def uuid schema path
+  # 기본 프로필 UUID 읽기
+  local def uuid list schema
   def="$(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null || true)"
-  if [ -z "$def" ] || [ "$def" = "@ms nothing" ]; then
-    # 첫 번째 프로필 시도
-    local list
+
+  # 정상 값은 보통:  'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+  uuid="$(printf '%s\n' "$def" | sed -E "s/^'([0-9a-f-]+)'$/\1/")"
+
+  # 비어있거나 @ms nothing이면 list에서 첫 번째를 가져온다
+  if [ -z "${uuid:-}" ] || [ "$uuid" = "@ms nothing" ]; then
     list="$(gsettings get org.gnome.Terminal.ProfilesList list 2>/dev/null || true)"
-    uuid="$(printf '%s' "$list" | sed -E "s/.*'([0-9a-f-]+)'.*/\1/")"
-  else
-    uuid="$(printf '%s' "$def" | tr -d \')" | sed -E 's/^.+([0-9a-f-]+).+$/\1/')"
-    # 위 한 줄이 복잡하면 아래 대체:
-    uuid="$(printf '%s' "$def" | sed -E "s/.*'([0-9a-f-]+)'.*/\1/")"
+    uuid="$(printf '%s\n' "$list" | sed -E "s/.*'([0-9a-f-]+)'.*/\1/")"
   fi
 
   if [ -z "${uuid:-}" ]; then
@@ -138,6 +140,9 @@ fi
 
 # --- WSL이면 Windows에 Nerd Font 설치 시도 (옵션) ---
 install_fonts_windows_from_wsl() {
+  if ! is_wsl; then
+    return 0
+  fi
   if ! command -v powershell.exe >/dev/null 2>&1; then
     warn "powershell.exe 를 찾지 못했습니다(WSL 환경 아님?). Windows 설치를 건너뜁니다."
     return 0
@@ -146,7 +151,6 @@ install_fonts_windows_from_wsl() {
   local psfile="/mnt/c/Windows/Temp/install-nerdfonts.ps1"
   sudo mkdir -p /mnt/c/Windows/Temp || true
 
-  # PowerShell 스크립트 작성
   cat | sudo tee "$psfile" >/dev/null <<'PS1'
 Param(
   [string[]]$Fonts = @("FiraCode"),
@@ -174,7 +178,6 @@ foreach($name in $Fonts){
     if(-not $files){ Warn "$name: no font files"; continue }
     foreach($f in $files){
       Copy-Item $f.FullName -Destination $fontsDir -Force
-      # 레지스트리 등록(사용자 범위)
       $fn = [System.IO.Path]::GetFileName($f.FullName)
       $disp = ($fn -replace '\.(ttf|otf)$','') + " (TrueType)"
       New-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" `
@@ -187,7 +190,6 @@ foreach($name in $Fonts){
 Say "Done. 터미널/VS Code에서 Nerd Font로 폰트를 선택하세요."
 PS1
 
-  # WSL → Windows PowerShell 실행
   local psfonts
   psfonts="$(printf '%s' "$FONTS" | tr ' ' ',')"
   say "Windows 쪽 Nerd Fonts 설치 시도(WSL)… → $FONTS"
@@ -196,15 +198,10 @@ PS1
   }
 }
 
-if is_wsl; then
-  say "WSL 환경 감지"
-  if [ "$APPLY_WSL_WINDOWS" = "1" ]; then
-    install_fonts_windows_from_wsl
-  else
-    say "Windows 측 자동 설치를 건너뜁니다(APPLY_WSL_WINDOWS=0)."
-  fi
+if [ "$APPLY_WSL_WINDOWS" = "1" ]; then
+  install_fonts_windows_from_wsl
 else
-  say "WSL 아님(순수 Ubuntu). Windows 측 설치는 생략."
+  say "Windows 측 자동 설치를 건너뜁니다(APPLY_WSL_WINDOWS=0)."
 fi
 
 say "완료!  터미널/에디터에서 폰트를 '${GNOME_FONT_FAMILY}'(또는 Mono 변형)로 선택하세요."
