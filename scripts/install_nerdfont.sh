@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
 # scripts/install_nerdfont.sh
-# Ubuntu용 Nerd Font 설치 + (옵션) WSL에서 Windows에 설치 + (옵션) GNOME Terminal 폰트 자동 적용
-# 기본 폰트: FiraCode Nerd Font
-#
-# Usage:
-#   bash scripts/install_nerdfont.sh
-#
-# Env:
-#   FONTS="FiraCode JetBrainsMono Hack"   # 설치할 폰트 ZIP 이름들(기본: FiraCode)
-#   SCOPE="user" | "system"               # 리눅스 설치 범위(기본: user)
-#   APPLY_GNOME=1|0                       # GNOME Terminal 폰트 자동 적용(기본: 1)
-#   GNOME_FONT_FAMILY="FiraCode Nerd Font Mono"  # GNOME에 적용할 폰트명
-#   GNOME_FONT_SIZE=12                    # GNOME 폰트 크기
-#   APPLY_WSL_WINDOWS=1|0                 # WSL이면 Windows에 폰트 자동 설치 시도(기본: 1)
-
+# Ubuntu Nerd Font 설치 + (옵션) GNOME Terminal 적용 + (옵션) WSL→Windows 설치
+# 기본 폰트: FiraCode
 set -euo pipefail
 
 FONTS="${FONTS:-FiraCode}"
@@ -27,10 +15,17 @@ say()  { printf '\033[1;32m[+] %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[!] %s\033[0m\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1; }
 
+# --- WSL 감지(강화) ---
 is_wsl() {
-  grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null
+  # 커널 문자열 + /mnt/c 존재 모두 확인
+  if grep -qiE '(microsoft|wsl)' /proc/version /proc/sys/kernel/osrelease 2>/dev/null \
+     && [ -d /mnt/c/Windows ]; then
+    return 0
+  fi
+  return 1
 }
 
+# --- 다운로드 헬퍼 ---
 DL() {
   local url="$1" out="$2"
   if need curl; then
@@ -38,7 +33,7 @@ DL() {
   elif need wget; then
     wget -q "$url" -O "$out"
   else
-    warn "curl/wget이 필요합니다. 설치 후 다시 시도하세요."
+    warn "curl 또는 wget이 필요합니다."
     return 1
   fi
 }
@@ -60,7 +55,7 @@ else
 fi
 $SUDO mkdir -p "$DEST"
 
-# --- 리눅스(Nerd Font) 설치 ---
+# --- 리눅스에 Nerd Font 설치 ---
 install_font_linux() {
   local name="$1"
   local tmpdir zip url
@@ -74,7 +69,7 @@ install_font_linux() {
     rm -rf "$tmpdir"; return 1
   fi
 
-  say "압축 해제: $zip"
+  say "압축 해제"
   if ! unzip -oq "$zip" -d "$tmpdir/${name}"; then
     warn "$name: unzip 실패"
     rm -rf "$tmpdir"; return 1
@@ -87,64 +82,56 @@ install_font_linux() {
     rm -rf "$tmpdir"; return 1
   fi
 
-  say "설치 경로: $DEST"
+  say "설치 → $DEST"
   $SUDO cp -v "${files[@]}" "$DEST/" >/dev/null || true
   rm -rf "$tmpdir"
   return 0
 }
 
 for f in $FONTS; do
-  install_font_linux "$f" || warn "$f 설치 중 문제 발생(계속 진행)"
+  install_font_linux "$f" || warn "$f 설치 중 일부 실패(계속)"
 done
 
 say "fc-cache 갱신…"
 $SUDO fc-cache -fv >/dev/null || true
 
-# --- GNOME Terminal 자동 적용 (옵션) ---
+# --- GNOME Terminal 폰트 적용(옵션) ---
 apply_gnome_terminal_font() {
-  # gsettings / D-Bus 세션 필요
   if ! need gsettings; then
-    warn "gsettings가 없어 GNOME 적용을 건너뜁니다."
+    warn "gsettings 없음 → GNOME 적용 건너뜀"
     return 0
   fi
 
-  # 기본 프로필 UUID 읽기
   local def uuid list schema
   def="$(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null || true)"
-
-  # 정상 값은 보통:  'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+  # 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' 형태 추출
   uuid="$(printf '%s\n' "$def" | sed -E "s/^'([0-9a-f-]+)'$/\1/")"
-
-  # 비어있거나 @ms nothing이면 list에서 첫 번째를 가져온다
   if [ -z "${uuid:-}" ] || [ "$uuid" = "@ms nothing" ]; then
     list="$(gsettings get org.gnome.Terminal.ProfilesList list 2>/dev/null || true)"
     uuid="$(printf '%s\n' "$list" | sed -E "s/.*'([0-9a-f-]+)'.*/\1/")"
   fi
 
   if [ -z "${uuid:-}" ]; then
-    warn "GNOME Terminal 프로필을 찾지 못했습니다. 수동으로 폰트를 선택하세요."
+    warn "GNOME Terminal 프로필 UUID를 찾지 못했습니다(수동 설정 요망)."
     return 0
   fi
 
   schema="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:${uuid}/"
-  say "GNOME Terminal 폰트 적용 → ${GNOME_FONT_FAMILY} ${GNOME_FONT_SIZE}"
+  say "GNOME Terminal 폰트 적용: ${GNOME_FONT_FAMILY} ${GNOME_FONT_SIZE}"
   gsettings set "$schema" use-system-font false || warn "use-system-font 설정 실패"
   gsettings set "$schema" font "${GNOME_FONT_FAMILY} ${GNOME_FONT_SIZE}" || warn "font 설정 실패"
 }
 
-if [ "$APPLY_GNOME" = "1" ]; then
-  apply_gnome_terminal_font
-else
-  say "GNOME Terminal 자동 적용을 건너뜁니다(APPLY_GNOME=0)."
-fi
+[ "$APPLY_GNOME" = "1" ] && apply_gnome_terminal_font || say "GNOME 적용 건너뜀(APPLY_GNOME=0)"
 
-# --- WSL이면 Windows에 Nerd Font 설치 시도 (옵션) ---
+# --- (WSL 전용) Windows에 Nerd Font 설치(옵션) ---
 install_fonts_windows_from_wsl() {
+  # 이중 안전판
   if ! is_wsl; then
     return 0
   fi
   if ! command -v powershell.exe >/dev/null 2>&1; then
-    warn "powershell.exe 를 찾지 못했습니다(WSL 환경 아님?). Windows 설치를 건너뜁니다."
+    warn "powershell.exe 없음 → Windows 설치 건너뜀"
     return 0
   fi
 
@@ -192,17 +179,18 @@ PS1
 
   local psfonts
   psfonts="$(printf '%s' "$FONTS" | tr ' ' ',')"
-  say "Windows 쪽 Nerd Fonts 설치 시도(WSL)… → $FONTS"
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\\Windows\\Temp\\install-nerdfonts.ps1" -Fonts @($psfonts) || {
-    warn "Windows 측 설치 중 문제가 발생했습니다. Windows에서 수동 설치를 권장합니다."
-  }
+  say "Windows 쪽 Nerd Fonts 설치 시도(WSL) → $FONTS"
+  # 실패해도 스크립트 중단되지 않도록 보호
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\\Windows\\Temp\\install-nerdfonts.ps1" -Fonts @($psfonts) || \
+    warn "Windows 측 설치 실패(권한/네트워크 확인)"
 }
 
-if [ "$APPLY_WSL_WINDOWS" = "1" ]; then
+# *** 여기서부터가 핵심 수정: WSL이 아닐 땐 아예 호출하지 않음 ***
+if is_wsl && [ "$APPLY_WSL_WINDOWS" = "1" ]; then
   install_fonts_windows_from_wsl
 else
-  say "Windows 측 자동 설치를 건너뜁니다(APPLY_WSL_WINDOWS=0)."
+  say "WSL 아님 또는 Windows 설치 비활성화(APPLY_WSL_WINDOWS=$APPLY_WSL_WINDOWS) → 건너뜀"
 fi
 
-say "완료!  터미널/에디터에서 폰트를 '${GNOME_FONT_FAMILY}'(또는 Mono 변형)로 선택하세요."
+say "완료!  터미널/에디터에서 '${GNOME_FONT_FAMILY}'(또는 Mono 변형)를 선택하세요."
 
